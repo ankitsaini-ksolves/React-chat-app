@@ -1,3 +1,13 @@
+.clear-icon {
+  position: absolute;
+  right: 60px;
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: pointer;
+  font-size: 24px;
+  color: #888;
+  z-index: 10;
+}
 
 .chat-box {
   background-color: #f8f9fa;

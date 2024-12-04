@@ -1,21 +1,21 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-const { Pool } = require("pg");
-const cors = require("cors");
-require("dotenv").config();
+import express from "express";
+import {Server} from 'socket.io'
+import {createServer} from 'http'
+import cors from 'cors'
+import dotenv from 'dotenv';
+import pg from 'pg'; 
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 
+dotenv.config();
 const app = express();
+const server = createServer(app);
+const io = new Server(server);
+
 app.use(cors());
 app.use(express.json());
-const server = http.createServer(app);
-const io = new Server(server, {
-    cors: {
-        origin: "http://localhost:5173",
-        methods: ["GET", "POST"],
-    },
-});
 
+const { Pool } = pg;
 const pool = new Pool({
   user: process.env.DB_USER,
   host: process.env.DB_HOST,
@@ -24,8 +24,10 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
+
+io.on("connection", (socket)=>{
+    console.log("User Connected");
+})
 
 app.post("/signup", async (req, res) => {
   const { username, email, password } = req.body;
@@ -117,6 +119,100 @@ io.on("connection", (socket) => {
     socket.on("disconnect", () => {
         console.log("User disconnected:", socket.id);
     });
+});
+
+app.post("/posts", async (req, res) => {
+    const { title, description, category, user_id } = req.body;
+  
+    if (!title || !description || !category || !user_id) {
+      return res.status(400).json({ error: 'Please fill in all fields' });
+    }
+  
+    try {
+      const result = await pool.query(
+        "INSERT INTO posts (title, description, category, user_id) VALUES ($1, $2, $3, $4) RETURNING *",
+        [title, description, category, user_id]
+      );
+      const newPost = result.rows[0];
+      res.status(201).json(newPost);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Error saving post' });
+    }
+});
+  
+  
+app.get("/posts", async (req, res) => {
+    try {
+      const result = await pool.query("SELECT * FROM posts ORDER BY created_at DESC");
+      const posts = result.rows;
+      res.status(200).json(posts);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Error fetching posts" });
+    }
+});
+  
+app.get('/posts/:id', async (req, res) => {
+    const { id } = req.params;
+  
+    try {
+      const query = `
+        SELECT posts.*, users.username 
+        FROM posts 
+        JOIN users ON posts.user_id = users.id 
+        WHERE posts.id = $1
+      `;
+      const result = await pool.query(query, [id]);
+  
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
+  
+      res.status(200).json(result.rows[0]);
+    } catch (err) {
+      console.error('Error fetching post details:', err);
+      res.status(500).json({ error: 'Failed to fetch post details' });
+    }
+});  
+
+app.put('/posts/:id', async (req, res) => {
+    const { id } = req.params;
+    const { title, description, category } = req.body;
+  
+    try {
+      const result = await pool.query(
+        'UPDATE posts SET title = $1, description = $2, category = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $4 RETURNING *',
+        [title, description, category, id]
+      );
+  
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
+  
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to update the post' });
+    }
+});
+
+app.delete('/posts/:id', async (req, res) => {
+    const { id } = req.params;
+    console.log('Received DELETE request for id:', id);
+  
+    try {
+      const result = await pool.query('DELETE FROM posts WHERE id = $1 RETURNING *', [id]);
+  
+      if (result.rowCount === 0) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
+  
+      res.status(200).json({ message: 'Post deleted successfully', post: result.rows[0] });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Failed to delete the post' });
+    }
 });
 
 const port = 5000;
