@@ -10,7 +10,11 @@ import jwt from 'jsonwebtoken';
 dotenv.config();
 const app = express();
 const server = createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    cors: {
+        origin: "http://localhost:5173"
+    }
+});
 
 app.use(cors());
 app.use(express.json());
@@ -24,10 +28,23 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
+io.on('connection', (socket) => {
+  console.log('A user connected');
 
-io.on("connection", (socket)=>{
-    console.log("User Connected");
-})
+  socket.on('sendMessage', (newMessage) => {
+    console.log(newMessage.roomId)
+      socket.broadcast.to(newMessage.roomId).emit('receiveMessage', newMessage);
+  });
+
+  socket.on('joinRoom', (roomId) => {
+      socket.join(roomId);
+  });
+
+  socket.on('disconnect', () => {
+      console.log('A user disconnected');
+  });
+});
+
 
 app.post("/signup", async (req, res) => {
   const { username, email, password } = req.body;
@@ -77,7 +94,7 @@ app.get("/messages/:roomId", async (req, res) => {
     const { roomId } = req.params;
     try {
         const result = await pool.query(
-            "SELECT m.message, m.created_at, u.username FROM messages m JOIN users u ON m.user_id = u.id WHERE chat_room_id = $1 ORDER BY m.created_at ASC",
+            "SELECT m.user_id, m.message, m.created_at, u.username FROM messages m JOIN users u ON m.user_id = u.id WHERE chat_room_id = $1 ORDER BY m.created_at ASC",
             [roomId]
         );
         res.json(result.rows);
@@ -85,40 +102,6 @@ app.get("/messages/:roomId", async (req, res) => {
         console.error(error);
         res.status(500).send("Error fetching messages");
     }
-});
-
-io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
-
-    socket.on("joinRoom", (roomId) => {
-        socket.join(roomId);
-        console.log(`User ${socket.id} joined room ${roomId}`);
-    });
-
-    socket.on("sendMessage", async (data) => {
-        const { roomId, userId, message, username } = data;
-
-        try {
-            await pool.query(
-                "INSERT INTO messages (chat_room_id, user_id, message) VALUES ($1, $2, $3)",
-                [roomId, userId, message]
-            );
-
-            io.to(roomId).emit("receiveMessage", {
-                roomId,
-                userId,
-                message,
-                username,
-                createdAt: new Date(),
-            });
-        } catch (error) {
-            console.error("Error saving message:", error);
-        }
-    });
-
-    socket.on("disconnect", () => {
-        console.log("User disconnected:", socket.id);
-    });
 });
 
 app.post("/posts", async (req, res) => {
@@ -215,7 +198,31 @@ app.delete('/posts/:id', async (req, res) => {
     }
 });
 
+app.get('/rooms', async (req, res) => {
+  try {
+      const result = await pool.query('SELECT * FROM chat_rooms ORDER BY name ASC');
+      res.json(result.rows);
+  } catch (error) {
+      console.error('Error fetching rooms:', error);
+      res.status(500).send('Error fetching rooms');
+  }
+});
+
+app.post('/rooms', async (req, res) => {
+  const { name } = req.body;
+  try {
+      const result = await pool.query(
+          'INSERT INTO chat_rooms (name) VALUES ($1) RETURNING *',
+          [name]
+      );
+      res.status(201).json(result.rows[0]);
+  } catch (error) {
+      console.error('Error adding room:', error);
+      res.status(500).send('Error adding room');
+  }
+});
+
 const port = 5000;
-app.listen(port, () => console.log(`Server running on port ${port}`));
+server.listen(port, () => console.log(`Server running on port ${port}`));
 
 
