@@ -28,24 +28,27 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
-io.on('connection', (socket) => {
-  console.log('A user connected');
+//Socket Connection
+io.on("connection", (socket) => {
+  console.log("A user connected");
 
-  socket.on('sendMessage', (newMessage) => {
-    console.log(newMessage.roomId)
-      socket.broadcast.to(newMessage.roomId).emit('receiveMessage', newMessage);
+  socket.on("joinRoom", (roomId) => {
+    console.log(`User joined room: ${roomId}`);
+    socket.join(roomId);
   });
 
-  socket.on('joinRoom', (roomId) => {
-      socket.join(roomId);
+  socket.on("sendMessage", (newMessage) => {
+    console.log(`Message sent to room: ${newMessage.roomId}`);
+    io.to(newMessage.roomId).emit("receiveMessage", newMessage);
   });
 
-  socket.on('disconnect', () => {
-      console.log('A user disconnected');
+  socket.on("disconnect", () => {
+    console.log("A user disconnected");
   });
 });
 
 
+//Login and Signup Routes
 app.post("/signup", async (req, res) => {
   const { username, email, password } = req.body;
 
@@ -90,41 +93,28 @@ app.post("/login", async (req, res) => {
     });
 });
 
-app.get("/messages/:roomId", async (req, res) => {
-    const { roomId } = req.params;
-    try {
-        const result = await pool.query(
-            "SELECT m.user_id, m.message, m.created_at, u.username FROM messages m JOIN users u ON m.user_id = u.id WHERE chat_room_id = $1 ORDER BY m.created_at ASC",
-            [roomId]
-        );
-        res.json(result.rows);
-    } catch (error) {
-        console.error(error);
-        res.status(500).send("Error fetching messages");
-    }
+
+//Routes for POST functionality
+app.post("/posts", async (req, res) => {
+  const { title, description, category, user_id } = req.body;
+
+  if (!title || !description || !category || !user_id) {
+    return res.status(400).json({ error: 'Please fill in all fields' });
+  }
+
+  try {
+    const result = await pool.query(
+      "INSERT INTO posts (title, description, category, user_id) VALUES ($1, $2, $3, $4) RETURNING *",
+      [title, description, category, user_id]
+    );
+    const newPost = result.rows[0];
+    res.status(201).json(newPost);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error saving post' });
+  }
 });
 
-app.post("/posts", async (req, res) => {
-    const { title, description, category, user_id } = req.body;
-  
-    if (!title || !description || !category || !user_id) {
-      return res.status(400).json({ error: 'Please fill in all fields' });
-    }
-  
-    try {
-      const result = await pool.query(
-        "INSERT INTO posts (title, description, category, user_id) VALUES ($1, $2, $3, $4) RETURNING *",
-        [title, description, category, user_id]
-      );
-      const newPost = result.rows[0];
-      res.status(201).json(newPost);
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Error saving post' });
-    }
-});
-  
-  
 app.get("/posts", async (req, res) => {
     try {
       const result = await pool.query("SELECT * FROM posts ORDER BY created_at DESC");
@@ -198,6 +188,8 @@ app.delete('/posts/:id', async (req, res) => {
     }
 });
 
+
+//Chat Rooms Routes
 app.get('/rooms', async (req, res) => {
   try {
       const result = await pool.query('SELECT * FROM chat_rooms ORDER BY name ASC');
@@ -209,16 +201,73 @@ app.get('/rooms', async (req, res) => {
 });
 
 app.post('/rooms', async (req, res) => {
-  const { name } = req.body;
+  const { name, created_by } = req.body;
   try {
       const result = await pool.query(
-          'INSERT INTO chat_rooms (name) VALUES ($1) RETURNING *',
-          [name]
+          'INSERT INTO chat_rooms (name, created_by) VALUES ($1, $2) RETURNING *',
+          [name, created_by]
       );
       res.status(201).json(result.rows[0]);
   } catch (error) {
       console.error('Error adding room:', error);
       res.status(500).send('Error adding room');
+  }
+});
+
+app.delete('/rooms/:id', async (req, res) => {
+  const roomId = req.params.id;
+  console.log(roomId);
+
+
+  try {
+      const room = await pool.query(
+          'SELECT * FROM chat_rooms WHERE id = $1',
+          [roomId]
+      );
+      await pool.query('DELETE FROM chat_rooms WHERE id = $1', [roomId]);
+      res.status(200).send('Room deleted successfully');
+  } catch (error) {
+      console.error('Error deleting room:', error);
+      res.status(500).send('Error deleting room');
+  }
+});
+
+
+//Chat Messages Routes
+app.post("/messages", async (req, res) => {
+  const { roomId, user_id, message, username } = req.body;
+  console.log(username);
+  console.log("Saving message")
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO messages (chat_room_id, user_id, message, username) 
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [roomId, user_id, message, username]
+    );
+    const savedMessage = result.rows[0];
+
+    io.to(roomId).emit("receiveMessage", savedMessage);
+
+    res.status(201).json(savedMessage);
+  } catch (error) {
+    console.error("Error saving message:", error);
+    res.status(500).json({ error: "Failed to save message" });
+  }
+});
+
+app.get("/messages/:roomId", async (req, res) => {
+  const { roomId } = req.params;
+
+  try {
+    const result = await pool.query(
+      `SELECT * FROM messages WHERE chat_room_id = $1 ORDER BY created_at`,
+      [roomId]
+    );
+    res.status(200).json(result.rows);
+  } catch (error) {
+    console.error("Error fetching messages:", error);
+    res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
 
