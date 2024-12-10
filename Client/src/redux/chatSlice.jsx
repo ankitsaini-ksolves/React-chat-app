@@ -28,7 +28,6 @@ export const deleteRoom = createAsyncThunk("chat/deleteRoom", async (roomId) => 
 export const fetchMessages = createAsyncThunk("chat/fetchMessages", async (roomId) => {
     const response = await fetch(`${API_BASE_URL}/messages/${roomId}`);
     const data = await response.json();
-    console.log(data)
     return { roomId, messages: data };
   }
 );

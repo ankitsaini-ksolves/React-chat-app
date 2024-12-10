@@ -171,9 +171,7 @@ app.put('/posts/:id', async (req, res) => {
 });
 
 app.delete('/posts/:id', async (req, res) => {
-    const { id } = req.params;
-    console.log('Received DELETE request for id:', id);
-  
+    const { id } = req.params;  
     try {
       const result = await pool.query('DELETE FROM posts WHERE id = $1 RETURNING *', [id]);
   
@@ -216,8 +214,6 @@ app.post('/rooms', async (req, res) => {
 
 app.delete('/rooms/:id', async (req, res) => {
   const roomId = req.params.id;
-  console.log(roomId);
-
 
   try {
       const room = await pool.query(
@@ -236,8 +232,6 @@ app.delete('/rooms/:id', async (req, res) => {
 //Chat Messages Routes
 app.post("/messages", async (req, res) => {
   const { roomId, user_id, message, username } = req.body;
-  console.log(username);
-  console.log("Saving message")
 
   try {
     const result = await pool.query(
